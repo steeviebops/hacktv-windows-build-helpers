@@ -1,0 +1,62 @@
+--- build_win64.sh	2024-06-12 17:00:54.626856600 +0100
++++ ../build_win64.sh	2024-06-12 16:51:14.927254700 +0100
+@@ -50,6 +50,11 @@
+ 	
+ 	if [[ ! -d osmo-fl2k ]]; then
+ 		git clone --depth 1 https://gitea.osmocom.org/sdr/osmo-fl2k
++		# Patch for compilation error on more modern versions of GCC
++		cd osmo-fl2k/src/getopt/
++		wget https://lists.osmocom.org/hyperkitty/list/osmocom-sdr@lists.osmocom.org/message/KGOKNLMLIEECP4I5QQJE6JICFP3V2GAP/attachment/2/osmo-fl2k-getopts-args.patch
++		patch < osmo-fl2k-getopts-args.patch
++		cd ../../..
+ 	fi
+ 	
+ 	rm -rf osmo-fl2k/build
+@@ -106,13 +111,13 @@
+ 		--enable-static --disable-shared --disable-programs \
+ 		--disable-outdevs --disable-encoders \
+ 		--arch=x86_64 --target-os=mingw64 --cross-prefix=$HOST- \
+-		--pkg-config=pkg-config --prefix=$PREFIX
++		--pkg-config=pkg-config --prefix=$PREFIX --extra-ldflags="-fstack-protector"
+ 	make -j4 install
+ 	cd ..
+ fi
+ 
+ cd ..
+-CROSS_HOST=$HOST- make -j4 EXTRA_LDFLAGS="-static" EXTRA_PKGS="libusb-1.0"
++CROSS_HOST=$HOST- make -j4 EXTRA_LDFLAGS="-static -fstack-protector" EXTRA_PKGS="libusb-1.0"
+ $HOST-strip hacktv.exe
+ 
+ echo "Done"
+
+--- mac.c	2024-06-12 17:00:54.627853700 +0100
++++ ../mac.c	2024-06-12 16:40:19.406944900 +0100
+@@ -516,15 +521,22 @@
+ 	int i, mjd;
+ 	
+ 	/* Get the timezone offset */
+-	localtime_r(&timestamp, &tm);
+-	i = tm.tm_gmtoff / 1800;
+-	if(i < 0) i = -i | (1 << 5);
++	#ifndef WIN32
++		localtime_r(&timestamp, &tm);
++		i = tm.tm_gmtoff / 1800;
++		if(i < 0) i = -i | (1 << 5);
++		gmtime_r(&timestamp, &tm);
++	#else
++		localtime_s(&tm, &timestamp);
++		i = _timezone / 1800;
++		if(i < 0) i = -i | (1 << 5);
++		gmtime_s(&tm, &timestamp);
++	#endif
+ 	
+ 	/* Calculate Modified Julian Date */
+-	gmtime_r(&timestamp, &tm);
+ 	mjd = 367.0 * (1900 + tm.tm_year)
+-	    - (int) (7.0 * (1900 + tm.tm_year + (int) ((1 + tm.tm_mon + 9.0) / 12.0)) / 4.0)
+-	    + (int) (275.0 * (1 + tm.tm_mon) / 9.0) + tm.tm_mday - 678987.0;
++    		- (int) (7.0 * (1900 + tm.tm_year + (int) ((1 + tm.tm_mon + 9.0) / 12.0)) / 4.0)
++    		+ (int) (275.0 * (1 + tm.tm_mon) / 9.0) + tm.tm_mday - 678987.0;
+ 	
+ 	/* Set the Unified Date and Time sequence */
+ 	memset(udt, 0, 25);
